@@ -5734,9 +5734,15 @@ Run(function()
 
     AntiVoidFlag = vape.Categories.Blatant:CreateModule({
         Name = "AntiVoidFlag",
+        Tooltip = "Holds you in place when the server takes your character over the void, then puts you back on ground",
         Function = function(Callback: boolean)
             if Callback and replicatesignal then
-                local Seat, Welded = ReplicatedStorage.Assets.Effects.snowball_rider.Handle.Seat, false
+                local Seat
+                pcall(function()
+                    Seat = ReplicatedStorage.Assets.Effects.snowball_rider.Handle.Seat
+                end)
+                if not Seat then return end
+                local Welded = false
                 ;(function()
                     repeat
                         if Entity.isAlive then
