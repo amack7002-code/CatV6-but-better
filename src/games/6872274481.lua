@@ -9239,6 +9239,54 @@ Run(function()
 	local RayCheck: RaycastParams = RaycastParams.new()
 	RayCheck.RespectCanCollide = true
 	local FilterCharacter: Model?
+	local Zephyr
+	local ZephyrSpeeds: {any} = {}
+	local Measured: number = 0
+	local LastPosition: Vector3?
+
+	-- Zephyr (wind walker) holds up to 5 wind orbs and raises its constant speed multiplier per orb.
+	-- WindWalkerController is a game module, so probe the field names it has shipped under instead of
+	-- assuming one; with none present this reports 0 and the base slider is used.
+	local StackFields: {string} = {"stacks", "windStacks", "orbCount", "orbs", "orbAmount", "charges"}
+	local function GetWindStacks(): number
+	    local Controller = bedwars.WindWalkerController
+	    if not Controller then
+	        return 0
+	    end
+	    for _, Field: string in StackFields do
+	        local Count = tonumber(Controller[Field])
+	        if Count then
+	            return math.clamp(math.floor(Count), 0, 5)
+	        end
+	    end
+	    return 0
+	end
+
+	local function GetKit(): string
+	    local Equipped = Store.equippedKit
+	    if Equipped == nil or Equipped == "" then
+	        Equipped = LocalPlayer:GetAttribute("PlayingAsKits") or LocalPlayer:GetAttribute("PlayingAsKit")
+	    end
+	    return string.lower(tostring(Equipped or ""))
+	end
+
+	-- 0 stacks deliberately falls through to the base slider: clamping up to 1 used to hand out the
+	-- 1 stack speed while holding no orbs.
+	local function GetTargetSpeed(): number
+	    if not Zephyr or not Zephyr.Enabled or not Entity.isAlive then
+	        return Value.Value
+	    end
+	    local Kit: string = GetKit()
+	    if not (Kit:find("wind_walker", 1, true) or Kit:find("zephyr", 1, true)) then
+	        return Value.Value
+	    end
+	    local Stacks: number = GetWindStacks()
+	    if Stacks < 1 then
+	        return Value.Value
+	    end
+	    local Option = ZephyrSpeeds[math.min(Stacks, 5)]
+	    return Option and Option.Value or Value.Value
+	end
 	
 	Speed = vape.Categories.Blatant:CreateModule({
 	    Name = "Speed",
@@ -9251,7 +9299,7 @@ Run(function()
 	
 	        if Callback then
 	            if not Blatant then
-	                Modifier.moveSpeedMultiplier = Value.Value / 20
+	                Modifier.moveSpeedMultiplier = GetTargetSpeed() / 20
 	                local Handle = bedwars.SprintController:getMovementStatusModifier():addModifier(Modifier)
 	                Speed:Clean(function()
 	                    Handle:Destroy()
@@ -9268,10 +9316,19 @@ Run(function()
 	                        return
 	                    end
 	
+	                    if Zephyr and Zephyr.Enabled then
+	                        local Position: Vector3 = Entity.character.RootPart.Position
+	                        if LastPosition then
+	                            local Travelled: Vector3 = Position - LastPosition
+	                            Measured = Measured + (math.min(Vector3.new(Travelled.X, 0, Travelled.Z).Magnitude / math.max(Delta, 1e-4), 500) - Measured) * 0.5
+	                        end
+	                        LastPosition = Position
+	                    end
+
 	                    local MoveDirection: Vector3 = AntiFallDirection or Entity.character.Humanoid.MoveDirection
 	                    if Blatant then
 	                        local Root, CurrentSpeed = Entity.character.RootPart, GetSpeed()
-	                        local Destination: Vector3 = MoveDirection * math.max(Value.Value - CurrentSpeed, 0) * Delta
+	                        local Destination: Vector3 = MoveDirection * math.max(GetTargetSpeed() - CurrentSpeed, 0) * Delta
 	                        if WallCheck.Enabled then
 	                            if not LocalPlayer.Character or FilterCharacter ~= LocalPlayer.Character then
 	                                FilterCharacter = LocalPlayer.Character
@@ -9295,6 +9352,9 @@ Run(function()
 	        end
 	    end,
 	    ExtraText = function()
+	        if Zephyr and Zephyr.Enabled then
+	            return `{Mode.Value} {math.floor(Measured)} studs/s`
+	        end
 	        return Mode.Value
 	    end,
 	    Tooltip = "Increases your movement with various methods."
@@ -9319,7 +9379,7 @@ Run(function()
 	    Name = "Speed",
 	    Function = function(Val: number)
 	        if Speed.Enabled and Mode.Value == "Legit" then
-	            Modifier.moveSpeedMultiplier = Val / 20
+	            Modifier.moveSpeedMultiplier = GetTargetSpeed() / 20
 	            bedwars.SprintController:getMovementStatusModifier():updateModifiers()
 	        end
 	    end,
@@ -9344,6 +9404,50 @@ Run(function()
 	    Name = "Always Jump",
 	    Visible = false,
 	    Darker = true
+	})
+	local function UpdateLegitModifier()
+	    if Speed.Enabled and Mode.Value == "Legit" then
+	        Modifier.moveSpeedMultiplier = GetTargetSpeed() / 20
+	        bedwars.SprintController:getMovementStatusModifier():updateModifiers()
+	    end
+	end
+	Zephyr = Speed:CreateToggle({
+	    Name = "Zephyr speeds",
+	    Function = function(Callback: boolean)
+	        for _, Option in ZephyrSpeeds do
+	            Option.Object.Visible = Callback
+	        end
+	        LastPosition = nil
+	        Measured = 0
+	        UpdateLegitModifier()
+	    end,
+	    Tooltip = "Scales speed with Zephyr wind orbs instead of the flat Speed slider"
+	})
+	for Index: number = 1, 5 do
+	    ZephyrSpeeds[Index] = Speed:CreateSlider({
+	        Name = `Zephyr {Index} stack`,
+	        Function = function()
+	            UpdateLegitModifier()
+	        end,
+	        Min = 1,
+	        Max = 80,
+	        Default = 21 + Index,
+	        Suffix = function(Val: number)
+	            return Val == 1 and "stud" or "studs"
+	        end,
+	        Visible = false,
+	        Tooltip = `Speed while holding {Index} wind orb`
+	    })
+	end
+	Speed:CreateButton({
+	    Name = "Reset Zephyr speeds",
+	    Function = function()
+	        for Index: number = 1, 5 do
+	            ZephyrSpeeds[Index]:SetValue(21 + Index)
+	        end
+	        Value:SetValue(23)
+	    end,
+	    Tooltip = "Back to the default speed for each wind orb count"
 	})
 end)
 
@@ -40931,6 +41035,534 @@ Run(function()
 	    Max = 100,
 	    Default = 40,
 	    Suffix = "%"
+	})
+end)
+
+Run(function()
+	local TrixieDisabler
+	local KeepClose
+	local CloseDistance
+	-- How long a warp or rewind may go unanswered before the cycle starts over. Every unanswered
+	-- step left the real body standing still for the whole timeout.
+	local STALL_TIMEOUT: number = 3
+	local PreviousClonePosition: Vector3?
+	-- While active the real root is detached into the world and a clone drives the character, so
+	-- Warp and Rewind can be repeated while the real body is warped toward the clone each time.
+	local RealRoot, Character, Humanoid, Clone
+	local DiedConnection
+	local SavedHipHeight, SavedTransparency, SavedCanCollide, SavedCanQuery, SavedQueryIgnored
+	local Warping, AwaitingRewind, RewindRequested, Rewinding = false, false, false, false
+	local WarpTimeout, PhaseEnd, NextAction, RewindReadyAt = 0, 0, 0, 0
+	local HiddenPortals: {[Vector3]: boolean} = {}
+	local HiddenCount: number = 0
+
+	-- Remotes are reached through whichever of this build's conventions answers first.
+	local function ResolveRemote(Name: string): any
+	    local Remote
+	    pcall(function()
+	        Remote = bedwars.Client:Get(Name)
+	    end)
+	    if not Remote then
+	        pcall(function()
+	            Remote = bedwars.Handler:Get(Name)
+	        end)
+	    end
+	    return Remote
+	end
+
+	local function IsQueryIgnored(Part: BasePart): boolean
+	    local Success, Result = pcall(function()
+	        return bedwars.QueryUtil:isQueryIgnored(Part)
+	    end)
+	    return Success and Result == true
+	end
+
+	local function HasWarpData(Player: Player): boolean
+	    local Controller = bedwars.VoidWalkerKitController
+	    local Map = Controller and Controller.playerWarpDataMap
+	    return Map ~= nil and Map[Player] ~= nil
+	end
+
+	local function HasBeamOverride(Player: Player): boolean
+	    local Controller = bedwars.VoidWalkerKitController
+	    local Map = Controller and Controller.playerBeamOriginOverrideMap
+	    return Map ~= nil and Map[Player] ~= nil
+	end
+
+	-- Pulls the real root to the clone, capped so a long separation cannot launch it across the map.
+	local function SnapToClone()
+	    local Target: CFrame = Clone.CFrame
+	    local Offset: Vector3 = Target.Position - RealRoot.Position
+	    if Offset.Magnitude > 100 then
+	        Target = CFrame.new(RealRoot.Position + Offset.Unit * 100) * Target.Rotation
+	    end
+	    RealRoot.CFrame = Target
+	end
+
+	local function Release(MoveToClone: boolean?)
+	    if not RealRoot then
+	        return
+	    end
+	    if DiedConnection then
+	        DiedConnection:Disconnect()
+	        DiedConnection = nil
+	    end
+
+	    if RealRoot.Parent and Character.Parent then
+	        local Velocity: Vector3 = RealRoot.AssemblyLinearVelocity
+	        Character.Parent = ReplicatedStorage
+	        RealRoot.Parent = Character
+	        if Clone then
+	            if MoveToClone then
+	                SnapToClone()
+	                Velocity = Clone.AssemblyLinearVelocity
+	            end
+	            Clone:Destroy()
+	        end
+	        Character.PrimaryPart = RealRoot
+	        Character.Parent = workspace
+	        RealRoot.Transparency = SavedTransparency
+	        RealRoot.CanCollide = SavedCanCollide
+	        bedwars.QueryUtil:setQueryIgnored(RealRoot, SavedQueryIgnored)
+	        RealRoot.CanQuery = SavedCanQuery
+	        if Humanoid.Parent then
+	            Humanoid.HipHeight = SavedHipHeight
+	        end
+	        RealRoot.AssemblyLinearVelocity = Velocity
+	        local Ent = Entity.character
+	        if Ent and Ent.Character == Character then
+	            Ent.HumanoidRootPart = RealRoot
+	            Ent.RootPart = RealRoot
+	        end
+	    else
+	        if Clone then
+	            Clone:Destroy()
+	        end
+	        if RealRoot.Parent then
+	            RealRoot:Destroy()
+	        end
+	    end
+
+	    if Store.rootpart == RealRoot then
+	        Store.rootpart = nil
+	    end
+	    RealRoot, Character, Clone, Humanoid = nil, nil, nil, nil
+	    PreviousClonePosition = nil
+	    Warping, AwaitingRewind, RewindRequested, Rewinding = false, false, false, false
+	    WarpTimeout, PhaseEnd, NextAction, RewindReadyAt = 0, 0, 0, 0
+	end
+
+	local function Capture(): boolean
+	    if RealRoot or Store.rootpart or vape.MovementOwner or not Entity.isAlive or Store.equippedKit ~= "void_walker" then
+	        return false
+	    end
+	    local Char: Model? = LocalPlayer.Character
+	    if not Char or not Char.Parent or Entity.character.Character ~= Char or Entity.character.Humanoid.Health <= 0 then
+	        return false
+	    end
+	    local Controller = bedwars.VoidWalkerKitController
+	    if not Controller then
+	        return false
+	    end
+	    if HasWarpData(LocalPlayer) or HasBeamOverride(LocalPlayer)
+	        or not bedwars.AbilityController:canUseAbility("void_walker_warp", {disableBlockedAbilityAlert = true}) then
+	        return false
+	    end
+	    local Root: BasePart? = Entity.character.HumanoidRootPart or Entity.character.RootPart
+	    if not Root or Root.Parent ~= Char then
+	        return false
+	    end
+
+	    Character, RealRoot, Humanoid = Char, Root, Entity.character.Humanoid
+	    SavedTransparency = RealRoot.Transparency
+	    SavedHipHeight = Humanoid.HipHeight
+	    SavedCanQuery = RealRoot.CanQuery
+	    SavedCanCollide = RealRoot.CanCollide
+	    SavedQueryIgnored = IsQueryIgnored(RealRoot)
+
+	    Character.Parent = ReplicatedStorage
+	    Clone = RealRoot:Clone()
+	    Clone.Parent = Character
+	    RealRoot.Transparency = 1
+	    RealRoot.Parent = workspace
+	    Clone.AssemblyLinearVelocity = RealRoot.AssemblyLinearVelocity
+	    RealRoot.AssemblyLinearVelocity = Vector3.zero
+	    RealRoot.AssemblyAngularVelocity = Vector3.zero
+	    Store.rootpart = RealRoot
+	    Character.PrimaryPart = Clone
+	    Character.Parent = workspace
+	    bedwars.QueryUtil:setQueryIgnored(Clone, true)
+	    bedwars.QueryUtil:setQueryIgnored(RealRoot, true)
+
+	    DiedConnection = Humanoid.Died:Connect(function()
+	        if Character == Char then
+	            Release()
+	        end
+	    end)
+	    return true
+	end
+
+	TrixieDisabler = vape.Categories.Kits:CreateModule({
+	    Name = "TrixieDisabler",
+	    Function = function(Callback: boolean)
+	        local Controller = bedwars.VoidWalkerKitController
+	        local Abilities = bedwars.AbilityController
+	        if not Callback or not Controller or not Abilities then
+	            return
+	        end
+	        local Balance = bedwars.VoidWalkerKitBalance
+	        local DamageBuff = bedwars.VoidWalkerDamageBuff
+	        local WarpRemote = ResolveRemote("VoidWalker_ClientUsedWarpAbility")
+	        local RewindEvent = ResolveRemote("VoidWalker_Rewind")
+	        local PlayerBeamMap = Controller.playerBeamMap
+	        local Old: {[string]: any} = {}
+	        local OldAddAbilityButton = Abilities.addAbilityButton
+	        local OldNoDisplay = DamageBuff and DamageBuff.noDisplay
+	        local Active: boolean = true
+
+	        local function Hook(Name: string, New: (...any) -> ...any)
+	            if typeof(Controller[Name]) == "function" then
+	                Old[Name] = Controller[Name]
+	                Controller[Name] = New
+	            end
+	        end
+
+	        -- A portal is ours when it opens near the real body (within warp distance) or on the clone.
+	        local function OwnPortal(Position: Vector3): boolean
+	            if not RealRoot or typeof(Position) ~= "Vector3" or not Balance then
+	                return false
+	            end
+	            if RealRoot.Parent and (Position - RealRoot.Position).Magnitude <= Balance.WARP_DISTANCE + 5 then
+	                return true
+	            end
+	            return Clone ~= nil and Clone.Parent ~= nil and (Position - Clone.Position).Magnitude <= 15
+	        end
+
+	        TrixieDisabler:Clean(function()
+	            Active = false
+	            for Name, Function in Old do
+	                Controller[Name] = Function
+	            end
+	            table.clear(Old)
+	            table.clear(HiddenPortals)
+	            HiddenCount = 0
+	            if DamageBuff then
+	                DamageBuff.noDisplay = OldNoDisplay
+	            end
+	            if OldAddAbilityButton then
+	                Abilities.addAbilityButton = OldAddAbilityButton
+	                local RewindAbility = Abilities:getEnabledAbility("void_walker_rewind")
+	                if RewindAbility then
+	                    OldAddAbilityButton(Abilities, RewindAbility)
+	                end
+	            end
+	            Release(Humanoid ~= nil and Humanoid.Health > 0 and LocalPlayer.Character == Character)
+	        end)
+
+	        if DamageBuff then
+	            DamageBuff.noDisplay = true
+	        end
+
+	        -- The Rewind button is driven by this module, so it is kept off the ability bar.
+	        if typeof(OldAddAbilityButton) == "function" then
+	            Abilities.addAbilityButton = function(self, Ability, ...)
+	                if Ability.abilityId == "void_walker_rewind" then
+	                    return
+	                end
+	                return OldAddAbilityButton(self, Ability, ...)
+	            end
+	        end
+	        if Controller.rewindUIMaid then
+	            pcall(function()
+	                Controller.rewindUIMaid:DoCleaning()
+	            end)
+	        end
+	        for _, Object: Instance in LocalPlayer.PlayerGui:GetDescendants() do
+	            if Object.Name == "void_walker_rewind" and Object:IsA("GuiObject") then
+	                local Visible: boolean = Object.Visible
+	                Object.Visible = false
+	                TrixieDisabler:Clean(function()
+	                    if Object.Parent then
+	                        Object.Visible = Visible
+	                    end
+	                end)
+	            end
+	        end
+
+	        Hook("onAbilityUsed", function(self, Player, Data, ...)
+	            if Active and RealRoot and typeof(Data) == "table" and Data.ability == "void_walker_warp" then
+	                return
+	            end
+	            return Old.onAbilityUsed(self, Player, Data, ...)
+	        end)
+	        Hook("createPortal", function(self, Position, ...)
+	            if Active and OwnPortal(Position) then
+	                if HiddenCount >= 32 then
+	                    table.clear(HiddenPortals)
+	                    HiddenCount = 0
+	                end
+	                HiddenPortals[Position] = true
+	                HiddenCount += 1
+	                return Instance.new("Model")
+	            end
+	            return Old.createPortal(self, Position, ...)
+	        end)
+	        Hook("playPortalOpenSound", function(self, Position, ...)
+	            if Active and (HiddenPortals[Position] or OwnPortal(Position)) then
+	                return
+	            end
+	            return Old.playPortalOpenSound(self, Position, ...)
+	        end)
+	        Hook("playPortalCloseSound", function(self, Position, ...)
+	            if Active and (HiddenPortals[Position] or OwnPortal(Position)) then
+	                return
+	            end
+	            return Old.playPortalCloseSound(self, Position, ...)
+	        end)
+	        Hook("enableBeam", function(self, Beam, ...)
+	            if Active and RealRoot and PlayerBeamMap and Beam == PlayerBeamMap[LocalPlayer] then
+	                return
+	            end
+	            return Old.enableBeam(self, Beam, ...)
+	        end)
+	        if Controller.portals then
+	            for _, Portal: Instance in Controller.portals do
+	                if Portal.Parent then
+	                    Portal.Parent = ReplicatedStorage
+	                end
+	            end
+	        end
+	        Hook("teleportPlayer", function(self, Player, A, B, Delay, Skip, ...)
+	            if Active and RealRoot and LocalPlayer.Character == Character and Player == LocalPlayer then
+	                if not Skip then
+	                    Warping, AwaitingRewind = true, true
+	                    PhaseEnd = os.clock() + math.max(Delay or 0, 0) + 0.2
+	                    WarpTimeout = PhaseEnd + STALL_TIMEOUT
+	                end
+	                return
+	            end
+	            return Old.teleportPlayer(self, Player, A, B, Delay, Skip, ...)
+	        end)
+	        Hook("useWarpAbility", function(self, Player, ...)
+	            local OwnClone = Active and Player == LocalPlayer and LocalPlayer.Character == Character and Clone
+	            local Velocity = OwnClone and OwnClone.AssemblyLinearVelocity
+	            local Result = Old.useWarpAbility(self, Player, ...)
+	            if Active and Player == LocalPlayer and self.rewindUIMaid then
+	                pcall(function()
+	                    self.rewindUIMaid:DoCleaning()
+	                end)
+	            end
+	            if OwnClone and OwnClone == Clone and OwnClone.Parent then
+	                OwnClone.AssemblyLinearVelocity = Velocity
+	            end
+	            return Result
+	        end)
+
+	        if RewindEvent then
+	            local Connection
+	            pcall(function()
+	                Connection = (RewindEvent.Remote or RewindEvent):Connect(function(Data)
+	                    if Active and Warping and RewindRequested and RealRoot and LocalPlayer.Character == Character and Data.player == LocalPlayer then
+	                        Rewinding = true
+	                        PhaseEnd = os.clock() + math.max(Data.endTime - workspace:GetServerTimeNow(), 0)
+	                        RewindReadyAt = Data.endTime + (Balance and Balance.REWIND_COOLDOWN or 0)
+	                        WarpTimeout = PhaseEnd + STALL_TIMEOUT
+	                    end
+	                end)
+	            end)
+	            if Connection then
+	                TrixieDisabler:Clean(Connection)
+	            end
+	        end
+	        TrixieDisabler:Clean(LocalPlayer.CharacterRemoving:Connect(function(Char)
+	            if Active and Character == Char then
+	                Release()
+	            end
+	        end))
+
+	        local GameWorldUtil
+	        pcall(function()
+	            GameWorldUtil = require(ReplicatedStorage.TS.util["game-world-util"]).GameWorldUtil
+	        end)
+
+	        TrixieDisabler:Clean(RunService.Heartbeat:Connect(function()
+	            if not Active then
+	                return
+	            end
+	            if not RealRoot then
+	                Capture()
+	                return
+	            end
+	            if LocalPlayer.Character ~= Character or not Character.Parent or not RealRoot.Parent or not Clone or not Clone.Parent
+	                or Humanoid.Health <= 0 or Store.equippedKit ~= "void_walker" or vape.MovementOwner then
+	                Release()
+	                return
+	            end
+	            RealRoot.AssemblyLinearVelocity = Vector3.zero
+	            RealRoot.AssemblyAngularVelocity = Vector3.zero
+	            local Now: number = os.clock()
+
+	            -- Keep close: once the clone is more than Close distance ahead of the real body, the
+	            -- part of each frame's movement that takes it further away is scaled down (to 35% at
+	            -- twice the distance). Movement back toward the body and sideways is left alone.
+	            local ClonePosition: Vector3 = Clone.Position
+	            if KeepClose and KeepClose.Enabled and PreviousClonePosition then
+	                local Offset: Vector3 = ClonePosition - RealRoot.Position
+	                local Flat: Vector3 = Vector3.new(Offset.X, 0, Offset.Z)
+	                local Excess: number = Flat.Magnitude - CloseDistance.Value
+	                if Excess > 0 then
+	                    local Away: Vector3 = Flat.Unit
+	                    local Moved: Vector3 = ClonePosition - PreviousClonePosition
+	                    local Outward: number = Moved:Dot(Away)
+	                    if Outward > 0 and Outward < 50 then
+	                        local Keep: number = math.clamp(1 - Excess / CloseDistance.Value, 0.35, 1)
+	                        Clone.CFrame -= Away * Outward * (1 - Keep)
+	                        ClonePosition = Clone.Position
+	                    end
+	                end
+	            end
+	            PreviousClonePosition = ClonePosition
+
+	            if Rewinding and Now >= PhaseEnd then
+	                if typeof(Controller.disablePlayerBeam) == "function" then
+	                    pcall(function()
+	                        Controller:disablePlayerBeam(LocalPlayer)
+	                    end)
+	                end
+	                Warping, AwaitingRewind, RewindRequested, Rewinding = false, false, false, false
+	                NextAction = Now
+	            end
+	            if Warping and Now >= WarpTimeout then
+	                Warping, AwaitingRewind, RewindRequested, Rewinding = false, false, false, false
+	                NextAction = Now + 0.1
+	                return
+	            end
+
+	            if not AwaitingRewind and not Rewinding then
+	                if not Warping and HasWarpData(LocalPlayer) then
+	                    Warping, AwaitingRewind = true, true
+	                    PhaseEnd, WarpTimeout = Now, Now + STALL_TIMEOUT
+	                elseif Now >= NextAction and not HasWarpData(LocalPlayer) and not HasBeamOverride(LocalPlayer)
+	                    and bedwars.AbilityController:canUseAbility("void_walker_warp", {disableBlockedAbilityAlert = true})
+	                    and WarpRemote and Balance then
+	                    local Camera: Camera? = workspace.CurrentCamera
+	                    if not Camera then
+	                        return
+	                    end
+	                    local Origin: Vector3 = RealRoot.Position
+	                    local Offset: Vector3 = Clone.Position - Origin
+	                    local Direction: Vector3 = Offset.Magnitude > 0.1 and Offset.Unit or Camera.CFrame.LookVector
+	                    local Distance: number = math.clamp(Offset.Magnitude, 1, Balance.WARP_DISTANCE)
+	                    local Hit
+	                    if GameWorldUtil then
+	                        pcall(function()
+	                            Hit = GameWorldUtil.raycastWithOnlyWorldCollision(Origin, Direction, Distance)
+	                        end)
+	                    end
+	                    if not Warping then
+	                        WarpTimeout = Now + STALL_TIMEOUT
+	                    end
+	                    Warping = true
+	                    NextAction = Now + 0.1
+	                    pcall(function()
+	                        WarpRemote:SendToServer({
+	                            clientStartPosition = Origin,
+	                            direction = Direction,
+	                            clientDestinationPosition = Hit and Hit.Position or Origin + Direction * Distance
+	                        })
+	                    end)
+	                end
+	            elseif AwaitingRewind and not Rewinding and Now >= PhaseEnd and workspace:GetServerTimeNow() >= RewindReadyAt
+	                and (not RewindRequested or Now >= NextAction)
+	                and bedwars.AbilityController:getEnabledAbility("void_walker_rewind")
+	                and bedwars.AbilityController:canUseAbility("void_walker_rewind", {disableBlockedAbilityAlert = true}) then
+	                if not RewindRequested then
+	                    WarpTimeout = Now + STALL_TIMEOUT
+	                end
+	                RewindRequested = true
+	                NextAction = Now + 0.1
+	                bedwars.AbilityController:useAbility("void_walker_rewind")
+	            end
+	        end))
+
+	        Capture()
+	    end,
+	    Tooltip = "Keeps control of your clone while repeating Warp and Rewind, warping your real body toward the clone each time"
+	})
+	KeepClose = TrixieDisabler:CreateToggle({
+	    Name = "Keep close",
+	    Default = true,
+	    Function = function(Callback: boolean)
+	        if CloseDistance and CloseDistance.Object then
+	            CloseDistance.Object.Visible = Callback
+	        end
+	    end,
+	    Tooltip = "Slows your clone as it gets ahead of your body, so your camera stays close"
+	})
+	CloseDistance = TrixieDisabler:CreateSlider({
+	    Name = "Close distance",
+	    Min = 10,
+	    Max = 100,
+	    Default = 30,
+	    Suffix = "studs",
+	    Tooltip = "How far the clone may get ahead before it starts slowing down"
+	})
+end)
+
+Run(function()
+	local InfiniteTrixie
+	local OldSetOnCooldown, OldUseAbility
+
+	-- Rift Warp's cooldown is only enforced on this client: the cooldown controller is told to skip it
+	-- and the warp is fired straight through the sync event the ability controller would have used.
+	InfiniteTrixie = vape.Categories.Kits:CreateModule({
+	    Name = "InfiniteTrixie",
+	    Function = function(Callback: boolean)
+	        local Abilities = bedwars.AbilityController
+	        if not Abilities then
+	            return
+	        end
+	        if Callback then
+	            local Cooldowns = Abilities.cooldownController
+	            if Cooldowns and typeof(Cooldowns.setOnCooldown) == "function" then
+	                OldSetOnCooldown = Cooldowns.setOnCooldown
+	                Cooldowns.setOnCooldown = function(self, Ability, ...)
+	                    if Ability == "void_walker_warp" then
+	                        return
+	                    end
+	                    return OldSetOnCooldown(self, Ability, ...)
+	                end
+	                if typeof(Cooldowns.removeCooldown) == "function" then
+	                    pcall(function()
+	                        Cooldowns:removeCooldown("void_walker_warp")
+	                    end)
+	                end
+	            end
+
+	            OldUseAbility = Abilities.useAbility
+	            Abilities.useAbility = function(self, Ability, ...)
+	                if Ability == "void_walker_warp" then
+	                    local Sync = bedwars.SyncEvents and bedwars.SyncEvents.AbilityUsed
+	                    local Fire = Sync and (Sync.fire or Sync.Fire)
+	                    if Fire and LocalPlayer.Character and self:canUseAbility(Ability) then
+	                        pcall(Fire, Sync, LocalPlayer.Character, Ability, ...)
+	                        return
+	                    end
+	                    return OldUseAbility(self, Ability, ...)
+	                end
+	                return OldUseAbility(self, Ability, ...)
+	            end
+	        else
+	            if OldSetOnCooldown and Abilities.cooldownController then
+	                Abilities.cooldownController.setOnCooldown = OldSetOnCooldown
+	            end
+	            if OldUseAbility then
+	                Abilities.useAbility = OldUseAbility
+	            end
+	            OldSetOnCooldown, OldUseAbility = nil, nil
+	        end
+	    end,
+	    Tooltip = "Removes Rift Warp's clientside cooldown"
 	})
 end)
 
