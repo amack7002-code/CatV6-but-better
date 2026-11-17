@@ -1,4 +1,4 @@
-# Cat Vape — Cracked Build (Security Audit)
+# Cat Vape
 
 ## How the original protection worked
 1. `api.catvape.dev/script?key=...` — loader stub. **Never validates the key itself.**
@@ -19,3 +19,5 @@
 - **Critical:** auth callback is unsigned client-side Lua; `loadstring` of server response is a trust-on-delivery design.
 - **Medium:** HWID/tamper enforcement is client-side only (`string.find` on error text) — patchable.
 - **Low:** commit pinning uses a plain-text file, trivially spoofed.
+
+what this is not the cracked version totally
