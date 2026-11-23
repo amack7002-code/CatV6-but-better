@@ -12455,110 +12455,128 @@ end)
 Run(function()
 	local Headless
 	local Hats
-	
-	local Hidden: {[Decal]: number} = setmetatable({}, {__mode = "k"})
-	local Decals, Handles = {}, {}
-	local Watchers: {RBXScriptConnection} = {}
-	local Head
-	
-	local function Refresh(Character)
-	    for _, v: RBXScriptConnection in Watchers do
-	        v:Disconnect()
+	local HeadAttachments: {[string]: boolean} = {
+	    HatAttachment = true,
+	    HairAttachment = true,
+	    FaceFrontAttachment = true,
+	    FaceCenterAttachment = true,
+	    FaceBackAttachment = true
+	}
+	-- Original transparency per hidden instance, so disabling restores what the game had instead of
+	-- forcing 0: a tinted or half transparent hat must not come back fully opaque.
+	local Saved: {[Instance]: number} = setmetatable({}, {__mode = "k"})
+
+	local function Hide(Part: Instance?)
+	    if not Part or not Part:IsA("BasePart") then
+	        return
 	    end
-	
-	    table.clear(Watchers)
-	    table.clear(Decals)
-	    table.clear(Handles)
-	    Head = Character and Character:FindFirstChild("Head")
-	    if not Head then return end
-	
-	    for _, v: Instance in Head:GetChildren() do
-	        if v:IsA("Decal") then
-	            if not Hidden[v] then
-	                Hidden[v] = v.Transparency
-	            end
-	
-	            table.insert(Decals, v)
-	            v.Transparency = 1
-	        end
+	    if Saved[Part] == nil then
+	        Saved[Part] = Part.Transparency
 	    end
-	
-	    for _, v: Instance in Character:GetChildren() do
-	        if v:IsA("Accessory") and v.Handle and v.Handle:FindFirstChild("HatAttachment") then
-	            table.insert(Handles, v.Handle)
-	        end
-	    end
-	
-	    for _, v: RBXScriptSignal in {Character.ChildAdded, Character.ChildRemoved, Head.ChildAdded} do
-	        table.insert(Watchers, v:Connect(function()
-	            task.defer(function()
-	                if Headless.Enabled and Character.Parent then
-	                    Refresh(Character)
-	                end
-	            end)
-	        end))
+	    if Part.Transparency ~= 1 then
+	        Part.Transparency = 1
 	    end
 	end
-	
+
+	local function HideDecal(Decal: Instance?)
+	    if not Decal or not (Decal:IsA("Decal") or Decal:IsA("Texture")) then
+	        return
+	    end
+	    if Saved[Decal] == nil then
+	        Saved[Decal] = Decal.Transparency
+	    end
+	    if Decal.Transparency ~= 1 then
+	        Decal.Transparency = 1
+	    end
+	end
+
+	local function ApplyHeadless(Character: Model?)
+	    if not Character then
+	        return
+	    end
+	    local Head: Instance? = Character:FindFirstChild("Head")
+	    if not Head then
+	        return
+	    end
+	    Hide(Head)
+	    -- every decal or texture on the head, not just the stock "face" one
+	    for _, Item: Instance in Head:GetChildren() do
+	        if Item:IsA("Decal") or Item:IsA("Texture") then
+	            HideDecal(Item)
+	        end
+	    end
+	    if not Hats or not Hats.Enabled then
+	        return
+	    end
+	    for _, Accessory: Instance in Character:GetChildren() do
+	        if Accessory:IsA("Accoutrement") then
+	            local Handle: Instance? = Accessory:FindFirstChild("Handle")
+	            local Worn: boolean = false
+	            if Handle then
+	                for _, Attachment: Instance in Handle:GetChildren() do
+	                    if Attachment:IsA("Attachment") and HeadAttachments[Attachment.Name] then
+	                        Worn = true
+	                        break
+	                    end
+	                end
+	            end
+	            if Worn then
+	                Hide(Handle)
+	                for _, Item: Instance in Handle:GetChildren() do
+	                    if Item:IsA("Decal") or Item:IsA("Texture") then
+	                        HideDecal(Item)
+	                    end
+	                end
+	            end
+	        end
+	    end
+	end
+
+	local function Restore()
+	    for Object: Instance, Transparency: number in Saved do
+	        if Object.Parent then
+	            Object.Transparency = Transparency
+	        end
+	    end
+	    table.clear(Saved)
+	end
+
 	Headless = vape.Categories.Render:CreateModule({
 	    Name = "Headless",
 	    Function = function(Callback: boolean)
 	        if Callback then
-	            Refresh(Entity.isAlive and LocalPlayer.Character)
-	
+	            ApplyHeadless(LocalPlayer.Character)
+	            -- The character is refitted at will (head reset, accessories re-added), so the hide is
+	            -- re-applied on a slow tick instead of only once.
+	            local NextApply: number = 0
+	            Headless:Clean(RunService.Heartbeat:Connect(function()
+	                if not Headless.Enabled or os.clock() < NextApply then
+	                    return
+	                end
+	                NextApply = os.clock() + 0.1
+	                ApplyHeadless(LocalPlayer.Character)
+	            end))
 	            Headless:Clean(LocalPlayer.CharacterAdded:Connect(function(Character: Model)
 	                Character:WaitForChild("Head", 5)
-	                Refresh(Character)
+	                ApplyHeadless(Character)
 	            end))
-	
-	            Headless:Clean(RunService.PreRender:Connect(function()
-	                if not Head then return end
-	
-	                Head.LocalTransparencyModifier = 1
-	                if Hats.Enabled then
-	                    for _, v: BasePart in Handles do
-	                        v.LocalTransparencyModifier = 1
-	                    end
-	                end
-	            end))
-	
-	            Headless:Clean(function()
-	                if Head then
-	                    Head.LocalTransparencyModifier = 0
-	                end
-	
-	                for _, v: Decal in Decals do
-	                    v.Transparency = Hidden[v] or 0
-	                end
-	
-	                for _, v: BasePart in Handles do
-	                    v.LocalTransparencyModifier = 0
-	                end
-	
-	                for _, v: RBXScriptConnection in Watchers do
-	                    v:Disconnect()
-	                end
-	
-	                Head = nil
-	                table.clear(Watchers)
-	                table.clear(Decals)
-	                table.clear(Handles)
-	            end)
+	        else
+	            Restore()
 	        end
 	    end,
-	    Tooltip = "Hides your own head"
+	    Tooltip = "Hides your own head",
+	    Default = false
 	})
 	Hats = Headless:CreateToggle({
-	    Name = "Hide hats",
-	    Function = function(Callback: boolean)
-	        if not Callback then
-	            for _, v: BasePart in Handles do
-	                v.LocalTransparencyModifier = 0
-	            end
+	    Name = "Remove Accessories",
+	    Function = function()
+	        Restore()
+	        if Headless.Enabled then
+	            ApplyHeadless(LocalPlayer.Character)
 	        end
 	    end,
-	    Default = true,
-	    Tooltip = "Hides anything worn on your head too"
+	    Default = false,
+	    Tooltip = "Hides hats, hair and face accessories as well"
 	})
 end)
 
