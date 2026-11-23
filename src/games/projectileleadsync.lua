@@ -5,6 +5,7 @@
 -- half-ping compensation so the hit lands the frame you see it.
 local vape = shared.vape
 if not vape then return end
+if shared.catvapesupported == false then return end
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")

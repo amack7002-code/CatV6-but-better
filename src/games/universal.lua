@@ -152,18 +152,10 @@ local function SendNotification(...)
     return vape:CreateNotification(...)
 end
 
--- Places this build ships a game module for (src/games/<PlaceId>.lua). Everywhere else still builds
--- the universal menus, so say it once up front instead of leaving the game tabs looking half loaded.
-local SupportedPlaces: {[number]: boolean} = {
-    [6872274481] = true, -- BedWars
-    [6872265039] = true, -- BedWars (second place)
-    [8444591321] = true,
-    [8560631822] = true,
-    [139566161526375] = true
-}
-
-if not SupportedPlaces[game.PlaceId] then
-    SendNotification("Unsupported game", `No module for this place ({game.PlaceId}) - universal features only.`, 20, "warning")
+-- The loader sets this from the places it ships a game module for. Anywhere else only the universal
+-- menus exist, so say it once instead of leaving the game tabs looking half loaded.
+if shared.catvapesupported == false then
+    SendNotification("Game not supported", `This game is not supported ({game.PlaceId}) - universal features only.`, 20, "warning")
 end
 
 local function RemoveTags(Text: string)

@@ -1,6 +1,7 @@
 --!nocheck
 -- slop build - aero ports (combat modules from open-source sources)
 local vape = shared.vape
+if shared.catvapesupported == false then return end
 local playersService = game:GetService("Players")
 local collectionService = game:GetService("CollectionService")
 

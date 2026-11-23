@@ -9,6 +9,18 @@
 local Repo = "https://raw.githubusercontent.com/amack7002-code/CatV6-but-better/main"
 local Directory = "catsix"
 
+-- Places this build has a game module for. Anywhere else only the universal menus are built, so the
+-- game-only modules are not loaded at all instead of sitting there doing nothing.
+local SupportedPlaces = {
+	[6872274481] = true, -- BedWars
+	[6872265039] = true, -- BedWars (second place)
+	[8444591321] = true,
+	[8560631822] = true,
+	[139566161526375] = true,
+}
+local Supported = SupportedPlaces[game.PlaceId] == true
+shared.catvapesupported = Supported
+
 if not game:IsLoaded() then
 	game.Loaded:Wait()
 end
@@ -923,14 +935,18 @@ task.spawn(function()
 	LoadDeferred("staff", "games/staffdetector.lua", "staffdetector")
 	LoadDeferred("spectator", "games/spectatordetector.lua", "spectator")
 	LoadDeferred("cheatwatcher", "games/cheatwatcher.lua", "cheatwatcher")
-	LoadDeferred("ghostfix", "games/ghostfix.lua", "ghostfix")
+	if Supported then
+		LoadDeferred("ghostfix", "games/ghostfix.lua", "ghostfix")
+	end
 	LoadDeferred("aar", "games/aar.lua", "aar")
 	LoadDeferred("voidprediction", "games/voidprediction.lua", "voidprediction")
 	LoadDeferred("ghostpeak", "games/ghostpeak.lua", "ghostpeak")
 	LoadDeferred("playui", "games/playui.lua", "playui")
 	LoadDeferred("syle", "games/syle.lua", "syle")
-	LoadDeferred("aeroports", "games/aeroports.lua", "aeroports")
-	LoadDeferred("leadsync", "games/projectileleadsync.lua", "leadsync")
+	if Supported then
+		LoadDeferred("aeroports", "games/aeroports.lua", "aeroports")
+		LoadDeferred("leadsync", "games/projectileleadsync.lua", "leadsync")
+	end
 	--[[
 
 	if isfile(Directory .. "/games/extras.lua") then
