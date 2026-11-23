@@ -155,7 +155,7 @@ end
 -- The loader sets this from the places it ships a game module for. Anywhere else only the universal
 -- menus exist, so say it once instead of leaving the game tabs looking half loaded.
 if shared.catvapesupported == false then
-    SendNotification("Game not supported", `This game is not supported ({game.PlaceId}) - universal features only.`, 20, "warning")
+    shared.vape:CreateNotification("Vape", `Game not supported ({game.PlaceId})`, 15, "alert")
 end
 
 local function RemoveTags(Text: string)
