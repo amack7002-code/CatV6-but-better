@@ -152,10 +152,45 @@ local function SendNotification(...)
     return vape:CreateNotification(...)
 end
 
--- The loader sets this from the places it ships a game module for. Anywhere else only the universal
--- menus exist, so say it once instead of leaving the game tabs looking half loaded.
-if shared.catvapesupported == false then
-    shared.vape:CreateNotification("Vape", `Game not supported ({game.PlaceId})`, 15, "alert")
+-- Places this build has a game module for. Every entry point loads this file, so the check lives
+-- here: the loader sets the same flag earlier, this covers init.lua and the single-request build,
+-- and the game-only chunks test it before building their modules.
+local SupportedPlaces: {[number]: boolean} = {
+    [6872274481] = true, -- BedWars
+    [6872265039] = true, -- BedWars (second place)
+    [8444591321] = true,
+    [8560631822] = true,
+    [139566161526375] = true
+}
+if shared.catvapesupported == nil then
+    shared.catvapesupported = SupportedPlaces[game.PlaceId] == true
+end
+
+if not shared.catvapesupported then
+    -- vape.Notifications is only built inside vape:Load, and this file loads before it, so the toast
+    -- has to wait for that: calling CreateNotification from here indexes a nil container and would
+    -- abort the rest of this file instead of showing anything.
+    local Notified: boolean = false
+    local function Notify()
+        if Notified then
+            return
+        end
+        Notified = true
+        pcall(function()
+            vape:CreateNotification("Vape", `Game not supported ({game.PlaceId})`, 15, "alert")
+        end)
+    end
+
+    local Load = vape.Load
+    if type(Load) == "function" then
+        vape.Load = function(self, ...)
+            local Result = Load(self, ...)
+            Notify()
+            return Result
+        end
+    else
+        task.delay(5, Notify)
+    end
 end
 
 local function RemoveTags(Text: string)
